@@ -8,6 +8,7 @@ __pycache__/
 .env
 *.db
 *.db-journal
+*.secret
 data/samples/
 .pytest_cache/
 
