@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cashbridge import db, seed
+from cashbridge import db, seed, util
 
 
 @pytest.fixture(scope="session")
@@ -19,7 +19,7 @@ def seeded(tmp_path_factory):
     conn = db.connect(path)
     db.init_db(conn)
     ids = seed.run_seed(conn, as_of=None, seed=42)
-    yield {"conn": conn, "ids": ids, "as_of": date.today()}
+    yield {"conn": conn, "ids": ids, "as_of": util.today()}
     conn.close()
 
 
@@ -30,5 +30,5 @@ def mutable_env(tmp_path_factory):
     conn = db.connect(path)
     db.init_db(conn)
     ids = seed.run_seed(conn, as_of=None, seed=42)
-    yield {"conn": conn, "ids": ids, "as_of": date.today()}
+    yield {"conn": conn, "ids": ids, "as_of": util.today()}
     conn.close()

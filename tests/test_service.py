@@ -33,7 +33,8 @@ def _disburse_flow(env):
     assert offer["status"] == "draft"
     decided = service.decide_offer(conn, offer["id"], "approved", actor="owner")
     assert decided["status"] == "approved"
-    return offer, service.disburse_offer(conn, offer["id"])
+    env["token"] = decided["approval_token"]
+    return offer, service.disburse_offer(conn, offer["id"], approval_token=decided["approval_token"])
 
 
 def test_consent_lifecycle(env):
@@ -59,13 +60,16 @@ def test_offer_lifecycle_and_idempotency(env):
     assert disbursement["loan_id"]
     assert disbursement["installments"] >= 4
 
-    # replaying the same action is refused at the policy layer
-    again = service.disburse_offer(conn, offer["id"])
+    # replaying the same action is refused (same idempotency key)
+    again = service.disburse_offer(conn, offer["id"], approval_token=env["token"])
     assert again["error"]["code"] == "duplicate_action"
 
-    # even a fresh idempotency key cannot replay: approval binds to the draft state
-    replay = service.disburse_offer(conn, offer["id"], idempotency_key="manual-replay")
-    assert replay["error"]["code"] == "approval_missing"
+    # a fresh idempotency key cannot replay either: the approval token is single-use
+    replay = service.disburse_offer(conn, offer["id"], idempotency_key="manual-replay",
+                                    approval_token=env["token"])
+    assert replay["error"]["code"] == "duplicate_action"
+    # and without a token there is no approval at all
+    assert service.disburse_offer(conn, offer["id"], idempotency_key="k2")["error"]["code"] == "approval_missing"
 
     summary = service.sandbox_summary(conn, offer["business_id"])
     assert summary["total_disbursed"] == offer["principal"]
@@ -86,9 +90,9 @@ def test_revoke_blocks_disbursement(env):
     conn, online = env["conn"], env["ids"]["online"]
     service.grant_consent(conn, online)
     offer = service.draft_offer(conn, online, _eligible_product(conn, online))
-    service.decide_offer(conn, offer["id"], "approved", actor="owner")
+    token = service.decide_offer(conn, offer["id"], "approved", actor="owner")["approval_token"]
     service.revoke_consent(conn, online)
-    result = service.disburse_offer(conn, offer["id"])
+    result = service.disburse_offer(conn, offer["id"], approval_token=token)
     assert result["error"]["code"] == "consent_revoked"
 
 
@@ -125,3 +129,48 @@ def test_repayments_settle_loan(env):
                                 (offer["id"],)).fetchone()["status"]
     assert offer_status == "settled"
     assert audit_mod.verify_chain(conn)["ok"]
+
+
+def test_agent_cannot_approve(env):
+    conn, online = env["conn"], env["ids"]["online"]
+    service.grant_consent(conn, online)
+    offer = service.draft_offer(conn, online, _eligible_product(conn, online))
+    result = service.decide_offer(conn, offer["id"], "approved", actor="agent")
+    assert result["error"]["code"] == "tier_denied"
+    assert conn.execute("SELECT status FROM offers WHERE id=?", (offer["id"],)).fetchone()[0] == "draft"
+
+
+def test_token_bound_to_terms(env):
+    conn, online = env["conn"], env["ids"]["online"]
+    service.grant_consent(conn, online)
+    offer = service.draft_offer(conn, online, _eligible_product(conn, online))
+    token = service.decide_offer(conn, offer["id"], "approved", actor="owner")["approval_token"]
+    conn.execute("UPDATE offers SET principal = principal * 3 WHERE id = ?", (offer["id"],))
+    result = service.disburse_offer(conn, offer["id"], approval_token=token)
+    assert result["error"]["code"] == "approval_terms_changed"
+
+
+def test_forged_token_rejected(env):
+    conn, online = env["conn"], env["ids"]["online"]
+    service.grant_consent(conn, online)
+    offer = service.draft_offer(conn, online, _eligible_product(conn, online))
+    token = service.decide_offer(conn, offer["id"], "approved", actor="owner")["approval_token"]
+    forged = token.split(".")[0] + "." + "0" * 64
+    assert service.disburse_offer(conn, offer["id"], approval_token=forged)["error"]["code"] == "approval_invalid"
+
+
+def test_disbursement_moves_balance(env):
+    conn = env["conn"]
+    offer, _ = _disburse_flow(env)
+    bal_tx = conn.execute("SELECT amount FROM transactions WHERE source='sandbox' AND direction='in'").fetchone()
+    assert bal_tx["amount"] == offer["principal"]
+
+
+def test_audit_log_is_append_only(env):
+    import sqlite3
+    conn = env["conn"]
+    service.grant_consent(conn, env["ids"]["online"])
+    with pytest.raises(sqlite3.DatabaseError):
+        conn.execute("UPDATE audit_log SET actor = 'x'")
+    with pytest.raises(sqlite3.DatabaseError):
+        conn.execute("DELETE FROM audit_log")
