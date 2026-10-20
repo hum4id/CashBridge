@@ -35,16 +35,16 @@ Hard rules:
 5. Be brief: summary (1-2 sentences), why (2-4 sentences), then concrete next steps. No jargon.
 6. Get real numbers with the tools before answering cash questions. Prefer get_recommendations for a full analysis. Use draft_offer only when the owner asks for a financing option.
 7. If a tool returns an error, respect the limit and say so honestly.
-8. Write every amount as 'IDR 12,373,412' (currency, one space, comma thousand separators). Never reformat, round, or shorten a figure from a tool result.
+8. Never write a digit yourself. When you need a figure or date, write its placeholder from the FACTS list, e.g. {{get_recommendations.gap.shortfall}}. The system fills in the exact value.
 
-Finish by calling submit_explanation. Every key figure must cite the tool that produced it."""
+Finish by calling submit_explanation."""
 
 SUBMIT_EXPLANATION_SPEC = {
     "type": "function",
     "function": {
         "name": "submit_explanation",
-        "description": ("Submit the final structured explanation. Every number must come from "
-                        "tool outputs; cite the producing tool for each key figure."),
+        "description": ("Submit the final structured explanation. Text must not contain digits: "
+                        "use {{fact_key}} placeholders from the FACTS list for every figure."),
         "parameters": {
             "type": "object",
             "properties": {
@@ -52,22 +52,9 @@ SUBMIT_EXPLANATION_SPEC = {
                 "why": {"type": "string", "description": "Why it happens, grounded in computed drivers"},
                 "next_steps": {"type": "array", "items": {"type": "string"},
                                "description": "Recommended actions, non-loan options first"},
-                "key_figures": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "label": {"type": "string"},
-                            "value": {"type": "number"},
-                            "source": {"type": "string",
-                                       "description": "Tool name that produced this value"},
-                        },
-                        "required": ["label", "value", "source"],
-                    },
-                },
                 "confidence": {"type": "string", "enum": ["low", "medium", "high"]},
             },
-            "required": ["summary", "why", "key_figures"],
+            "required": ["summary", "why"],
         },
     },
 }
@@ -291,11 +278,12 @@ def _mock_answer(conn, business_id: int, question: str, granted_tier: str, actor
 # ------------------------------------------------------------------- llm mode
 
 def _request_explanation(client, messages: list, allowed: set, known: set,
-                         max_retries: int = 1) -> tuple:
+                         max_retries: int = 1, facts: Optional[dict] = None) -> tuple:
+    facts = facts or {}
+    fact_lines = "\n".join(f"{{{{{k}}}}} = {guardrails.format_fact(k, v)}" for k, v in facts.items())
     convo = messages + [{"role": "user", "content": (
-        "Now submit your final explanation with the submit_explanation tool. "
-        "Every number must come from the tool outputs above; cite the producing tool "
-        "for each key figure.")}]
+        "Now submit your final explanation with the submit_explanation tool. Do not type any "
+        "digit. Refer to figures and dates only through these placeholders:\nFACTS\n" + fact_lines)}]
     issues = []
     for _ in range(max_retries + 1):
         # NOTE: tool_choice="auto" (not a named function) because some
@@ -325,14 +313,15 @@ def _request_explanation(client, messages: list, allowed: set, known: set,
         if payload is None:
             continue
         try:
+            payload = guardrails.fill_placeholders(payload, facts)
             explanation = _parse_explanation(payload)
-        except Exception as exc:  # pydantic ValidationError
+        except Exception as exc:  # pydantic ValidationError or placeholder violation
             issues = [f"schema validation failed: {exc}"]
             convo = convo + [
                 _assistant_message(msg),
                 {"role": "tool", "tool_call_id": call.id,
                  "content": json.dumps({"status": "rejected", "issues": issues})},
-                {"role": "user", "content": "Fix the schema issues and resubmit."},
+                {"role": "user", "content": "Fix these issues and resubmit (placeholders only, no digits)."},
             ]
             continue
         validation = guardrails.validate_explanation(explanation, allowed, known)
@@ -360,6 +349,7 @@ def _llm_answer(conn, business_id: int, question: str, granted_tier: str, actor:
                                      f"Owner question: {question}")},
     ]
     specs = tools_mod.openai_tool_specs()
+    masker = guardrails.Pseudonymizer()   # third-party names never reach the LLM provider
     log = []
     for _ in range(max_steps):
         response = client.chat.completions.create(
@@ -381,19 +371,25 @@ def _llm_answer(conn, business_id: int, question: str, granted_tier: str, actor:
             log.append({"name": name, "args": args, "ok": "error" not in result,
                         "result": result})
             messages.append({"role": "tool", "tool_call_id": call.id,
-                             "content": json.dumps(result, default=str)})
+                             "content": json.dumps(masker.mask(result), default=str)})
 
     allowed = _collect_numbers([entry["result"] for entry in log], set())
     known = {entry["name"] for entry in log if entry["ok"]}
+    facts = guardrails.build_facts({e["name"]: e["result"] for e in log if e["ok"]})
     # max_retries=2: with tool_choice="auto" one round may be spent nudging
     # a text-only reply back onto submit_explanation.
     explanation, issues = _request_explanation(client, messages, allowed, known,
-                                               max_retries=2)
+                                               max_retries=2, facts=facts)
     if explanation is None:
         raise RuntimeError("LLM explanation failed grounding validation: "
                            + "; ".join(issues[:3]))
 
     validation = guardrails.validate_explanation(explanation, allowed, known)
+    explanation = explanation.model_copy(update={
+        "summary": masker.unmask(explanation.summary),
+        "why": masker.unmask(explanation.why),
+        "next_steps": [masker.unmask(step) for step in explanation.next_steps],
+    })
     return {
         "engine": "llm",
         "answer": _dump(explanation),
@@ -414,7 +410,12 @@ def answer_question(conn, business_id: int, question: str, granted_tier: str = D
     "llm" forces the API path (and falls back to mock on any failure).
     """
     engine = _choose_engine(force_engine)
-    if engine == "mock":
+    from . import service  # local import: service imports nothing from here
+    if engine == "llm" and not service.consent_active(conn, business_id, "external_ai"):
+        result = _mock_answer(
+            conn, business_id, question, granted_tier, actor, engine="mock_fallback",
+            note="External AI consent not granted; template engine used (no data left the system).")
+    elif engine == "mock":
         result = _mock_answer(conn, business_id, question, granted_tier, actor, engine="mock")
     else:
         try:
@@ -427,6 +428,7 @@ def answer_question(conn, business_id: int, question: str, granted_tier: str = D
 
     result["business_id"] = business_id
     result["question"] = question
+    result["label"] = guardrails.content_label(result["engine"], config.settings.openrouter_model)
     audit.append(conn, actor, "advice_generated", "business", str(business_id),
                  {"engine": result["engine"], "question": (question or "")[:200],
                   "tools": [t["name"] for t in result["tool_calls"]],
