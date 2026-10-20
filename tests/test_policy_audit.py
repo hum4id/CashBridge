@@ -70,6 +70,9 @@ def test_audit_chain_valid(fresh_conn):
 def test_audit_detects_tampering(fresh_conn):
     audit.append(fresh_conn, "owner", "consent_granted", "business", "1", {"scope": "transactions:read"})
     audit.append(fresh_conn, "agent", "forecast_run", "business", "1", {"horizon_days": 14})
+    # An attacker with direct file access can drop the append-only trigger first;
+    # the hash chain must still catch the edit.
+    fresh_conn.execute("DROP TRIGGER audit_no_update")
     fresh_conn.execute("UPDATE audit_log SET payload = '{\"tampered\":true}' WHERE id = 1")
     fresh_conn.commit()
     result = audit.verify_chain(fresh_conn)
@@ -80,6 +83,7 @@ def test_audit_detects_tampering(fresh_conn):
 def test_audit_detects_deletion(fresh_conn):
     audit.append(fresh_conn, "owner", "consent_granted", "business", "1", {})
     audit.append(fresh_conn, "agent", "forecast_run", "business", "1", {})
+    fresh_conn.execute("DROP TRIGGER audit_no_delete")
     fresh_conn.execute("DELETE FROM audit_log WHERE id = 1")
     fresh_conn.commit()
     result = audit.verify_chain(fresh_conn)

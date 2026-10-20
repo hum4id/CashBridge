@@ -80,6 +80,7 @@ def test_llm_failure_falls_back_to_template(env, monkeypatch):
         raise RuntimeError("no LLM API key configured (set OPENROUTER_API_KEY in .env)")
 
     monkeypatch.setattr(orchestrator, "_build_client", boom)
+    service.grant_consent(env["conn"], env["ids"]["online"], "external_ai")
     result = _ask(env, "online", force_engine="llm")
     assert result["engine"] == "mock_fallback"
     assert "LLM unavailable" in (result["note"] or "")
