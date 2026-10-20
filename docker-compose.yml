@@ -1,0 +1,16 @@
+services:
+  cashbridge:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      APP_ENV: production
+      CASHBRIDGE_SECRET: ${CASHBRIDGE_SECRET:?set a random 48+ char secret}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:?set a demo password (>= 12 chars)}
+      CASHBRIDGE_AS_OF: ${CASHBRIDGE_AS_OF:-2026-11-06}
+      MOCK_LLM: ${MOCK_LLM:-1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+    volumes: ["cbdata:/data"]
+    restart: unless-stopped
+volumes:
+  cbdata:
