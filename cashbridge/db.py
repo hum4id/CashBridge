@@ -124,7 +124,18 @@ CREATE TABLE IF NOT EXISTS offers (
     coverage_ratio REAL NOT NULL,
     schedule TEXT NOT NULL DEFAULT '[]',  -- JSON list of installments
     rationale TEXT,
+    disclosure TEXT,                      -- JSON comprehensive financing-cost disclosure
     status TEXT NOT NULL DEFAULT 'draft', -- draft|approved|rejected|disbursed|settled
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS review_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    business_id INTEGER NOT NULL REFERENCES businesses(id),
+    subject TEXT NOT NULL,                -- e.g. "loan_decision"
+    detail TEXT,                          -- JSON snapshot of the automated decision
+    requested_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open',  -- open|resolved
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -167,6 +178,39 @@ CREATE TABLE IF NOT EXISTS audit_log (
     hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS approval_nonces (
+    nonce TEXT PRIMARY KEY,
+    offer_id INTEGER NOT NULL,
+    owner TEXT NOT NULL,
+    used_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Web layer: owners, ownership, sessions.
+CREATE TABLE IF NOT EXISTS owners (
+    username TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_businesses (
+    username TEXT NOT NULL,
+    business_id INTEGER NOT NULL,
+    PRIMARY KEY (username, business_id)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    csrf TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_failures (username TEXT NOT NULL, at REAL NOT NULL);
+
+-- The audit log is append-only at the database level too (the hash chain detects
+-- tampering; these triggers prevent casual edits through the app's connection).
+CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log
+BEGIN SELECT RAISE(ABORT, 'audit_log is append-only'); END;
+
 CREATE TABLE IF NOT EXISTS sandbox_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     business_id INTEGER NOT NULL REFERENCES businesses(id),
@@ -179,7 +223,10 @@ CREATE TABLE IF NOT EXISTS sandbox_ledger (
 """
 
 _RESET_ORDER = [
+    "sessions",
+    "owner_businesses",
     "sandbox_ledger",
+    "approval_nonces",
     "repayments",
     "loans",
     "approvals",
@@ -208,14 +255,31 @@ def connect(db_path=None) -> sqlite3.Connection:
     return conn
 
 
+_MIGRATIONS = [
+    "ALTER TABLE offers ADD COLUMN disclosure TEXT",
+]
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for stmt in _MIGRATIONS:          # additive migrations for databases created earlier
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass                      # column already exists
     conn.commit()
 
 
 def reset_all(conn: sqlite3.Connection) -> None:
+    """Demo reset: wipes all demo data, including the (append-only) audit log.
+
+    The audit triggers are dropped for the reset and re-created by ``init_db``;
+    this is the only code path allowed to remove audit rows, and it is a full reset.
+    """
+    conn.execute("DROP TRIGGER IF EXISTS audit_no_delete")
     for table in _RESET_ORDER:
         conn.execute(f"DELETE FROM {table}")
+    conn.executescript(SCHEMA)
     try:
         conn.execute("DELETE FROM sqlite_sequence")  # ids restart at 1 after a demo reset
     except sqlite3.OperationalError:
