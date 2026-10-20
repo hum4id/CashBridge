@@ -40,7 +40,7 @@ def _as_int(value) -> Optional[int]:
 
 def _as_of(args: dict) -> date:
     raw = args.get("as_of")
-    return util.parse_date(raw) if raw else date.today()
+    return util.parse_date(raw) if raw else util.today()
 
 
 def _require_business(conn, args: dict) -> dict:
@@ -100,7 +100,9 @@ def _condense_recommendation(rec: dict) -> dict:
             "blocked": rec["loan"]["blocked"],
             "block_reason": rec["loan"]["block_reason"],
             "products": [
-                {**{k: e[k] for k in _PRODUCT_FIELDS}, "schedule": e["schedule"]}
+                {**{k: e[k] for k in _PRODUCT_FIELDS}, "schedule": e["schedule"],
+                 "apr_effective": e["cost_disclosure"]["apr_effective"],
+                 "reason_code": e["reason_code"], "repay_prob": e["repay_prob"]}
                 for e in rec["loan"]["products"]
             ],
         }
@@ -173,9 +175,16 @@ def _h_detect_gaps(ctx, args) -> dict:
 def _h_get_recommendations(ctx, args) -> dict:
     conn = ctx["conn"]
     business = _require_business(conn, args)
-    return _condense_recommendation(
+    out = _condense_recommendation(
         recommend_mod.recommend(conn, business["id"], as_of=_as_of(args))
     )
+    if not service.consent_active(conn, business["id"], "financing"):
+        # loan options are only shown under the separate financing consent
+        out = {k: v for k, v in out.items() if k not in ("loan", "loan_products", "eligible_products")}
+        out["financing_note"] = "Financing consent not granted: loan options are hidden."
+        if out.get("decision") in ("loan_available", "loan_blocked"):
+            out["decision"], out["message"] = "financing_consent_required", out["financing_note"]
+    return out
 
 
 def _clean_adjustments(raw) -> dict:
@@ -241,6 +250,21 @@ def _h_simulate_scenario(ctx, args) -> dict:
         "clears_safety": simulated_min >= safety,
         "simulated_forecast": _condensed_forecast(simulated),
     }
+
+
+def _h_reconcile(ctx, args) -> dict:
+    from cashbridge import reconcile
+    conn = ctx["conn"]
+    business = _require_business(conn, args)
+    out = reconcile.propose_matches(conn, business["id"], as_of=_as_of(args))
+    for m in out["matches"]:
+        m["debtor"] = guardrails.wrap_untrusted("receivable.debtor", m["debtor"])
+        m["description"] = guardrails.wrap_untrusted("transaction.description", m["description"])
+    for o in out["overdue_unmatched"]:
+        o["debtor"] = guardrails.wrap_untrusted("receivable.debtor", o["debtor"])
+    for c in out["unmatched_credits"]:
+        c["description"] = guardrails.wrap_untrusted("transaction.description", c["description"])
+    return out
 
 
 def _h_get_receivables(ctx, args) -> dict:
@@ -400,6 +424,13 @@ TOOLS: dict = {
                                "limit": {"type": "integer", "minimum": 1, "maximum": 50},
                                "as_of": _AS_OF}, ["business_id"]),
         "handler": _h_get_receivables,
+    },
+    "reconcile_receivables": {
+        "description": ("Propose matches between bank credits and open invoices, plus overdue invoices. "
+                        "Read-only: the owner confirms each match in the UI."),
+        "action": "view_data",
+        "parameters": _schema({"business_id": _BID, "as_of": _AS_OF}, ["business_id"]),
+        "handler": lambda ctx, args: _h_reconcile(ctx, args),
     },
     "draft_offer": {
         "description": ("Draft a proportional loan offer for ONE eligible product (e.g. 'receivable_bridge'). "
