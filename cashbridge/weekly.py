@@ -43,7 +43,7 @@ def _window_totals(conn, business_id: int, start, end) -> dict:
 
 def weekly_delta(conn, business_id: int, as_of=None) -> dict:
     """Compare the last 7 days with the 7 days before them."""
-    as_of = util.parse_date(as_of) if as_of else date.today()
+    as_of = util.parse_date(as_of) if as_of else util.today()
     current = _window_totals(conn, business_id, util.add_days(as_of, -7), as_of)
     previous = _window_totals(conn, business_id, util.add_days(as_of, -14),
                               util.add_days(as_of, -7))
