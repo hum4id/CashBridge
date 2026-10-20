@@ -23,14 +23,21 @@ def main(argv=None) -> int:
     parser.add_argument("--db", default=None, help="SQLite path (default: CASHBRIDGE_DB)")
     parser.add_argument("--as-of", default=None, help="YYYY-MM-DD (default: today)")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--if-empty", action="store_true",
+                        help="do nothing when the database already holds businesses (container start)")
     parser.add_argument("--samples-dir", default=str(config.BASE_DIR / "data" / "samples"))
     args = parser.parse_args(argv)
 
-    as_of = util.parse_date(args.as_of) if args.as_of else date.today()
+    as_of = util.parse_date(args.as_of) if args.as_of else util.today()
     conn = db.connect(args.db)
     db.init_db(conn)
+    if args.if_empty and db.list_businesses(conn):
+        print("database already seeded; skipping")
+        return 0
     db.reset_all(conn)  # idempotent regeneration: wipe previous demo state first
     ids = seed.run_seed(conn, as_of=as_of, seed=args.seed)
+    from app import auth
+    auth.ensure_demo_owner(conn)  # the demo login owns the regenerated businesses
     for business_id in ids.values():
         # onboarding: the owner grants data-use consent before any analysis
         service.grant_consent(conn, business_id, actor="owner")
