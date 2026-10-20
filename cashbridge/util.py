@@ -16,6 +16,19 @@ def parse_date(value) -> date:
     return datetime.strptime(str(value), ISO).date()
 
 
+def today() -> date:
+    """The app's notion of "today" (demo clock, see config.Settings.as_of).
+
+    Never call ``date.today()`` directly in the app: the demo data is relative to
+    this date, so mixing the two clocks makes results depend on the weekday.
+    """
+    from . import config  # local import: config imports nothing from util
+    raw = (config.settings.as_of or "").strip().lower()
+    if raw in ("", "today", "now"):
+        return date.today()
+    return parse_date(raw)
+
+
 def format_date(value) -> str:
     return parse_date(value).isoformat()
 
