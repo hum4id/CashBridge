@@ -23,12 +23,13 @@ import mimetypes
 from datetime import date
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Form, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import api, audit, service
+from . import api, audit, auth, service
+from .guard import LoginRequired, guard
 from cashbridge import config, db, forecast as forecast_mod
 from cashbridge import ingest, recommend as recommend_mod, util, weekly
 
@@ -106,10 +107,12 @@ def _engine_label() -> str:
     return f"LLM: {config.settings.openrouter_model}"
 
 
-def _business_strip(conn, active_id=None) -> list:
+def _business_strip(conn, active_id=None, owned=None) -> list:
     """Business ticker rows for the strip under the top nav (name, balance, 7-day delta)."""
     rows = []
     for overview in service.list_overview(conn):
+        if owned is not None and overview["id"] not in owned:
+            continue
         delta = weekly.weekly_delta(conn, overview["id"])
         rows.append({
             "id": overview["id"],
@@ -139,10 +142,17 @@ def _dashboard_context(conn, business_id: int, msg: str = None, level: str = "in
     offers = service.list_offers(conn, business_id)
     for offer in offers:
         last = conn.execute(
-            "SELECT decision, actor, note, created_at FROM approvals "
+            "SELECT decision, actor, note, decided_at FROM approvals "
             "WHERE offer_id = ? ORDER BY id DESC LIMIT 1", (offer["id"],)).fetchone()
         offer["last_approval"] = dict(last) if last else None
+    for offer in offers:
+        offer["disclosure_obj"] = json.loads(offer["disclosure"]) if offer.get("disclosure") else None
     sandbox = service.sandbox_summary(conn, business_id)
+    from cashbridge import reconcile
+    risk = forecast["risk"]
+    p = float(risk["p_breach"])
+    status = ("act" if recommendation["gap"] and recommendation["gap"]["severity"] == "expected"
+              else "watch" if p >= 0.10 else "safe")
     upload = dict(conn.execute(
         "SELECT COUNT(*) AS n, MAX(created_at) AS last FROM transactions "
         "WHERE business_id = ? AND source = 'csv'", (business_id,)).fetchone())
@@ -150,6 +160,13 @@ def _dashboard_context(conn, business_id: int, msg: str = None, level: str = "in
         "business": business,
         "balance": db.opening_balance(conn, business_id, recommendation["as_of"]),
         "consent_active": service.consent_active(conn, business_id),
+        "scopes": service.SCOPES,
+        "active_scopes": service.active_scopes(conn, business_id),
+        "status": status,
+        "p_breach": p,
+        "recon": reconcile.propose_matches(conn, business_id),
+        "reviews": [dict(r) for r in conn.execute(
+            "SELECT * FROM review_requests WHERE business_id = ? ORDER BY id DESC LIMIT 3", (business_id,))],
         "rec": recommendation,
         "chart": chart,
         "offers": offers,
@@ -167,21 +184,79 @@ def _dashboard_context(conn, business_id: int, msg: str = None, level: str = "in
     }
 
 
+MAX_UPLOAD_BYTES = 1_000_000
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; "
+       "base-uri 'self'; form-action 'self'; object-src 'none'")
+
+
 def create_app(db_path=None) -> FastAPI:
-    app = FastAPI(title="CashBridge", docs_url="/api/docs", redoc_url=None)
+    auth.check_production_config()
+    app = FastAPI(title="CashBridge", docs_url=None if auth.production() else "/api/docs",
+                  openapi_url=None if auth.production() else "/openapi.json", redoc_url=None,
+                  dependencies=[Depends(guard)])
     app.state.db_path = str(db_path or config.settings.db_path)
     app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
     app.include_router(api.router)
 
     conn = db.connect(app.state.db_path)
     db.init_db(conn)
+    auth.ensure_demo_owner(conn)
     conn.close()
+
+    @app.exception_handler(LoginRequired)
+    async def _to_login(request: Request, exc: LoginRequired):
+        return RedirectResponse(url="/login", status_code=303)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        if not request.url.path.startswith("/api/docs"):
+            response.headers.setdefault("Content-Security-Policy", CSP)
+        if auth.production():
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+        return response
+
+    # ------------------------------------------------------------------ auth
+
+    @app.get("/login")
+    def login_form(request: Request, msg: str = None, level: str = "info"):
+        return templates.TemplateResponse(request, "login.html", {
+            "msg": msg, "level": level, "strip": [], "nav_active": None,
+            "engine_label": _engine_label(), "demo": not auth.production()})
+
+    @app.post("/login")
+    def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+        conn = db.connect(app.state.db_path)
+        try:
+            result = auth.login(conn, username.strip().lower(), password)
+        except HTTPException as exc:
+            return _redirect("/login", exc.detail["reason"], "error")
+        finally:
+            conn.close()
+        if result is None:
+            return _redirect("/login", "Wrong username or password.", "error")
+        token, _csrf = result
+        response = RedirectResponse(url="/", status_code=303)
+        response.set_cookie(auth.COOKIE, token, httponly=True, samesite="lax",
+                            secure=auth.production(), max_age=auth.SESSION_TTL, path="/")
+        return response
+
+    @app.post("/logout")
+    def logout(request: Request, conn=Depends(get_conn)):
+        auth.logout(conn, request.cookies.get(auth.COOKIE))
+        response = RedirectResponse(url="/login", status_code=303)
+        response.delete_cookie(auth.COOKIE, path="/")
+        return response
 
     # ------------------------------------------------------------------ pages
 
     @app.get("/")
     def index(request: Request, msg: str = None, level: str = "info", conn=Depends(get_conn)):
-        businesses = _business_strip(conn)
+        businesses = _business_strip(conn, owned=request.state.owned)
         for business in businesses:
             recommendation = recommend_mod.recommend(conn, business["id"], persist=False)
             business["decision"] = recommendation["decision"]
@@ -196,6 +271,7 @@ def create_app(db_path=None) -> FastAPI:
         if db.get_business(conn, business_id) is None:
             return _redirect("/", f"Unknown business {business_id}", "error")
         context = _dashboard_context(conn, business_id, msg=msg, level=level)
+        context["strip"] = _business_strip(conn, active_id=business_id, owned=request.state.owned)
         return templates.TemplateResponse(request, "dashboard.html", context)
 
     # ---------------------------------------------------------------- actions
@@ -204,6 +280,47 @@ def create_app(db_path=None) -> FastAPI:
     def consent_grant(business_id: int, conn=Depends(get_conn)):
         service.grant_consent(conn, business_id, actor="owner")
         return _redirect(f"/business/{business_id}", "Data-use consent granted.", "success")
+
+    @app.post("/business/{business_id}/consent/{scope}/{action}")
+    def consent_scope(request: Request, business_id: int, scope: str, action: str, conn=Depends(get_conn)):
+        if scope not in service.SCOPES or action not in ("grant", "revoke"):
+            return _redirect(f"/business/{business_id}", "Unknown consent option.", "error")
+        if action == "grant":
+            service.grant_consent(conn, business_id, scope, actor=request.state.owner)
+        else:
+            service.revoke_consent(conn, business_id, actor=request.state.owner, scope=scope)
+        return _redirect(f"/business/{business_id}",
+                         f"Consent updated: {service.SCOPES[scope]} — {action}ed.", "success")
+
+    @app.post("/business/{business_id}/reconcile")
+    def reconcile_confirm(request: Request, business_id: int, receivable_id: int = Form(...),
+                          transaction_id: int = Form(...), conn=Depends(get_conn)):
+        owner_rec = conn.execute("SELECT business_id FROM receivables WHERE id = ?", (receivable_id,)).fetchone()
+        if not owner_rec or owner_rec["business_id"] != business_id:
+            return _redirect(f"/business/{business_id}", "Unknown invoice.", "error")
+        result = service.confirm_match(conn, receivable_id, transaction_id, actor=request.state.owner)
+        if "error" in result:
+            return _redirect(f"/business/{business_id}", result["error"]["reason"], "error")
+        return _redirect(f"/business/{business_id}", "Invoice marked as paid. Forecast updated.", "success")
+
+    @app.post("/business/{business_id}/review")
+    def review_request(request: Request, business_id: int, conn=Depends(get_conn)):
+        rec = recommend_mod.recommend(conn, business_id, persist=False)
+        detail = {"decision": rec["decision"], "message": rec["message"],
+                  "reason_codes": [p["reason_code"] for p in (rec["loan"] or {}).get("products", [])]}
+        result = service.request_human_review(conn, business_id, "loan_decision", detail,
+                                              actor=request.state.owner)
+        return _redirect(f"/business/{business_id}",
+                         f"Review #{result['review_id']} requested. A person will re-check this decision; "
+                         "the automated result is not final.", "success")
+
+    @app.post("/business/{business_id}/delete-data")
+    def delete_data(request: Request, business_id: int, confirm: str = Form(None), conn=Depends(get_conn)):
+        if confirm != "DELETE":
+            return _redirect(f"/business/{business_id}", "Type DELETE to confirm erasing your data.", "error")
+        service.delete_business_data(conn, business_id, actor=request.state.owner)
+        return _redirect("/", "Your transactions, invoices and forecasts were erased. "
+                              "Loan records and the audit trail are kept as required.", "success")
 
     @app.post("/business/{business_id}/consent/revoke")
     def consent_revoke(business_id: int, conn=Depends(get_conn)):
@@ -222,20 +339,27 @@ def create_app(db_path=None) -> FastAPI:
                          "success")
 
     @app.post("/offers/{offer_id}/approve")
-    def offer_approve(offer_id: int, conn=Depends(get_conn)):
-        result = service.decide_offer(conn, offer_id, "approved", actor="owner")
-        return _offer_redirect(conn, offer_id, result, "Offer approved.")
+    def offer_approve(request: Request, offer_id: int, confirm: str = Form(None), conn=Depends(get_conn)):
+        """Owner approval and sandbox execution in one deliberate action.
+
+        The approval token is minted and consumed server-side within this request;
+        it never reaches the browser, the LLM, or the bank API caller.
+        """
+        if confirm != "yes":
+            return _offer_redirect(conn, offer_id, {"error": {"reason": (
+                "Tick the box to confirm you read the amount, fee and repayment dates.")}}, "")
+        decided = service.decide_offer(conn, offer_id, "approved", actor=request.state.owner)
+        if "error" in decided:
+            return _offer_redirect(conn, offer_id, decided, "")
+        result = service.disburse_offer(conn, offer_id, actor=request.state.owner,
+                                        approval_token=decided["approval_token"])
+        return _offer_redirect(conn, offer_id, result,
+                               "Approved. Sandbox disbursement executed; repayment schedule created.")
 
     @app.post("/offers/{offer_id}/reject")
-    def offer_reject(offer_id: int, conn=Depends(get_conn)):
-        result = service.decide_offer(conn, offer_id, "rejected", actor="owner")
+    def offer_reject(request: Request, offer_id: int, conn=Depends(get_conn)):
+        result = service.decide_offer(conn, offer_id, "rejected", actor=request.state.owner)
         return _offer_redirect(conn, offer_id, result, "Offer rejected.")
-
-    @app.post("/offers/{offer_id}/disburse")
-    def offer_disburse(offer_id: int, conn=Depends(get_conn)):
-        result = service.disburse_offer(conn, offer_id, actor="owner")
-        return _offer_redirect(conn, offer_id, result,
-                               "Sandbox disbursement executed. Repayment schedule created.")
 
     def _offer_redirect(conn, offer_id: int, result: dict, success_msg: str):
         row = conn.execute("SELECT business_id FROM offers WHERE id = ?", (offer_id,)).fetchone()
@@ -265,7 +389,9 @@ def create_app(db_path=None) -> FastAPI:
     async def upload(business_id: int, file: UploadFile = File(...), conn=Depends(get_conn)):
         if db.get_business(conn, business_id) is None:
             return _redirect("/", f"Unknown business {business_id}", "error")
-        data = await file.read()
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            return _redirect(f"/business/{business_id}", "File too large (limit 1 MB).", "error")
         try:
             rows, warnings = ingest.parse_csv(data)
         except ValueError as exc:
@@ -294,7 +420,7 @@ def create_app(db_path=None) -> FastAPI:
     def onboard_form(request: Request, msg: str = None, level: str = "info", conn=Depends(get_conn)):
         return templates.TemplateResponse(request, "onboard.html",
                                           {"msg": msg, "level": level,
-                                           "strip": _business_strip(conn),
+                                           "strip": _business_strip(conn, owned=request.state.owned),
                                            "nav_active": "onboard",
                                            "engine_label": _engine_label()})
 
@@ -317,14 +443,18 @@ def create_app(db_path=None) -> FastAPI:
                    (business_id, date, description, counterparty, amount, direction, category,
                     is_cash_sale, source)
                    VALUES (?,?,?,?,?,'in','other_income',0,'onboard')""",
-                (business_id, util.format_date(date.today()), "Opening balance", "Owner",
+                (business_id, util.format_date(util.today()), "Opening balance", "Owner",
                  util.money(opening)))
+        conn.execute("INSERT OR IGNORE INTO owner_businesses (username, business_id) VALUES (?,?)",
+                     (request.state.owner, business_id))
         conn.commit()
-        service.grant_consent(conn, business_id, actor="owner")
+        service.grant_consent(conn, business_id, actor=request.state.owner)
 
         imported = None
         if file is not None and file.filename:
-            data = await file.read()
+            data = await file.read(MAX_UPLOAD_BYTES + 1)
+            if len(data) > MAX_UPLOAD_BYTES:
+                data = b""   # oversized: skipped, the owner can upload a smaller file later
             try:
                 rows, warnings = ingest.parse_csv(data)
                 if not rows.empty:
@@ -348,7 +478,7 @@ def create_app(db_path=None) -> FastAPI:
         return templates.TemplateResponse(request, "audit.html", {
             "chain": audit.verify_chain(conn),
             "entries": audit.recent(conn, min(max(limit, 10), 500)),
-            "strip": _business_strip(conn),
+            "strip": _business_strip(conn, owned=request.state.owned),
             "nav_active": "audit",
             "engine_label": _engine_label()})
 
@@ -366,7 +496,7 @@ def create_app(db_path=None) -> FastAPI:
         return templates.TemplateResponse(request, "bank.html", {
             "products": products, "loans": loans, "ledger": ledger,
             "chain": audit.verify_chain(conn),
-            "strip": _business_strip(conn),
+            "strip": _business_strip(conn, owned=request.state.owned),
             "nav_active": "bank",
             "engine_label": _engine_label()})
 
