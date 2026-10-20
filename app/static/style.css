@@ -41,8 +41,8 @@
   --loss: #F28B82;
   --loss-tint: rgba(242, 139, 130, 0.16);
   --radius: 12px;
-  --font-display: "Google Sans", "Product Sans", "Plus Jakarta Sans", system-ui, "Segoe UI", sans-serif;
-  --font-body: "Google Sans", "Product Sans", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Plus Jakarta Sans", system-ui, "Segoe UI", sans-serif;
+  --font-body: "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Roboto Mono", Consolas, "Cascadia Mono", monospace;
 }
 
@@ -291,3 +291,27 @@ pre { background: var(--surface-2); color: var(--ink); border: 1px solid var(--h
 .empty .icon.big { margin-bottom: 8px; }
 .empty p { margin: 6px 0 14px; color: var(--ink-2); }
 .watchlist td.name-cell { min-width: 220px; }
+
+/* login + approval confirm */
+.login-card { max-width: 380px; margin: 48px auto; }
+.login-card label { display: block; margin-top: 12px; }
+.login-card input { width: 100%; }
+.approve-form { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.logout { margin-left: 12px; }
+
+/* plain-language status + cost disclosure */
+.status { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 12px 16px;
+  border-radius: 12px; margin: 12px 0; background: var(--surface-2, #1f2124); }
+.status strong { font-size: 1.15rem; }
+.status-act strong { color: #F28B82; }
+.status-watch strong { color: #FDD663; }
+.status-safe strong { color: #81C995; }
+.disclosure { display: grid; grid-template-columns: auto auto; gap: 2px 12px; margin: 0 0 8px; }
+.disclosure div { display: contents; }
+.disclosure dt { color: var(--text-2, #9aa0a6); }
+.disclosure dd { margin: 0; font-variant-numeric: tabular-nums; }
+.ai-label { font-size: 0.8rem; color: var(--text-2, #9aa0a6); border-left: 3px solid #8AB4F8;
+  padding-left: 8px; margin-top: 8px; }
+.offer-review td { background: var(--surface-2, #1F2023); }
+.offer-review-inner { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-start; justify-content: space-between; }
+.offer-review-inner .stack { display: flex; flex-direction: column; gap: 8px; }

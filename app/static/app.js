@@ -35,7 +35,7 @@
   /* ------------------------------------------------------------- chart */
   function initForecastChart() {
     var canvas = document.getElementById("forecastChart");
-    var data = window.CASHBRIDGE_CHART;
+    var data = chartData();
     if (!canvas || !data) return;
     if (typeof Chart === "undefined") {
       // Offline fallback: show the minimum balances as text, no chart.
@@ -47,18 +47,18 @@
       return;
     }
     Chart.defaults.font.family =
-      "'Google Sans','Product Sans','Roboto',system-ui,sans-serif";
+      "'Roboto',system-ui,sans-serif";
     Chart.defaults.color = INK2;
     new Chart(canvas, {
       type: "line",
       data: {
         labels: data.labels,
         datasets: [
-          { label: "High", data: data.high, borderColor: GAIN, borderWidth: 1.5,
+          { label: "Best likely (P90)", data: data.high, borderColor: GAIN, borderWidth: 1.5,
             fill: { target: 2, above: "rgba(255,255,255,0.05)" }, tension: 0.3, pointRadius: 0 },
-          { label: "Expected", data: data.mid, borderColor: BLUE, borderWidth: 2.5,
+          { label: "Most likely (median)", data: data.mid, borderColor: BLUE, borderWidth: 2.5,
             fill: false, tension: 0.3, pointRadius: 0 },
-          { label: "Low", data: data.low, borderColor: LOSS, borderWidth: 1.5,
+          { label: "Worst likely (P10)", data: data.low, borderColor: LOSS, borderWidth: 1.5,
             fill: false, tension: 0.3, pointRadius: 0 },
           { label: "Safety threshold", data: data.labels.map(function () { return data.safety; }),
             borderColor: INK2, borderDash: [6, 4], pointRadius: 0, borderWidth: 1.5 }
@@ -99,6 +99,10 @@
       });
       html += "</table>";
     }
+    if (payload.label && payload.label.text) {
+      html += "<p class='ai-label' data-ai-generated='" + (payload.label.ai_generated ? "true" : "false") +
+        "'>" + esc(payload.label.text) + "</p>";
+    }
     if (ok === false && payload.validation.issues && payload.validation.issues.length) {
       html += "<p class='danger-text small'>" + esc(payload.validation.issues[0]) + "</p>";
     }
@@ -136,8 +140,8 @@
       out.innerHTML = skeleton(3);
       fetch(form.dataset.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: question, tier: form.tier.value })
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
+        body: JSON.stringify({ question: question })
       }).then(function (response) {
         return response.json().then(function (data) { return { status: response.status, data: data }; });
       }).then(function (result) {
@@ -152,6 +156,16 @@
         out.innerHTML = "<p class='danger-text'>" + esc(String(error)) + "</p>";
       });
     });
+  }
+
+  function chartData() {
+    var el = document.getElementById("chart-data");
+    try { return el ? JSON.parse(el.textContent) : null; } catch (e) { return null; }
+  }
+
+  function csrfToken() {
+    var meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.getAttribute("content") : "";
   }
 
   /* ----------------------------------------------------------- simulate */
@@ -173,7 +187,7 @@
       out.innerHTML = skeleton(2);
       fetch(form.dataset.endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken() },
         body: JSON.stringify({ adjustments: adjustmentsFor(form) })
       }).then(function (response) {
         return response.json().then(function (data) { return { status: response.status, data: data }; });
