@@ -1,98 +1,99 @@
 # CashBridge — SME Finance Copilot
 
-CashBridge is an SME finance copilot that helps small business owners **see cash
-shortfalls before they happen**, understand why, and evaluate non-loan options
-before being offered a proportional short-term loan. All banking actions are
-simulated in a sandbox.
+International Track · Topic E · *AI as a Financial Participant*
 
-Core principle: **code computes the numbers, the LLM explains them.** The LLM
-never invents amounts and never executes sensitive actions without explicit
-approval.
+CashBridge helps a small-business owner **see a cash shortfall before it happens**,
+understand why, try non-loan fixes first, match bank payments to open invoices, and,
+only if it still helps and is affordable, take a short-term loan with full cost
+disclosure. Money only moves in a bank **sandbox**, and only after the owner approves
+the exact terms.
+
+**Code computes every number. The language model only writes words** (it fills
+`{{placeholders}}`; any digit it types is rejected).
+
+## What it does
+
+| Capability | How |
+|---|---|
+| Cash-flow forecast & alerts | 2,000-path Monte Carlo (weekly block bootstrap, per-customer payment delays, backtest-calibrated band). Plain status: *Safe / Watch / Act now* with the probability of falling below the safety level. |
+| Financing-option matching | Non-loan options first (chase late invoices, defer bills except payroll/tax, …), kept only if they materially reduce risk. Then three sandbox products checked against 9 rules incl. 80% repayment probability, debt-service limit and the legal cost cap. |
+| Reconciliation | Proposes bank-credit ↔ invoice matches; owner confirms; forecast updates. |
+| Business analysis | Week-over-week delta, upcoming bills, what-if simulation, grounded Q&A. |
+| Safe execution | T0–T3 permission tiers; T3 = owner-only HMAC token bound to the terms, single use, 5 min, idempotency key, re-check, per-action and daily caps. |
+| Compliance | Separate consents (PIPL / UU PDP), external-AI opt-in with pseudonymisation, AI-content labels, cost disclosure with 24% cap (CN) / OJK cap (ID), human review, erasure. |
 
 ## Quick start
 
 ```bash
-python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
-
-# Generate the 3 demo businesses (12 weeks of synthetic data) + demo consent
-.venv\Scripts\python scripts\seed_data.py
-
-# Ask the copilot (works offline with MOCK_LLM=1)
-.venv\Scripts\python scripts\ask.py --business online "Will I run short on cash?"
-
-# Run the web app
-.venv\Scripts\python scripts\run_web.py            # http://127.0.0.1:8000
-
-# Run tests
-.venv\Scripts\python -m pytest
+python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+python scripts/seed_data.py                          # 3 demo businesses + consent
+python scripts/run_web.py                            # http://127.0.0.1:8000
 ```
 
-Copy `.env.example` to `.env` and fill in `OPENROUTER_API_KEY` when you want the
-real LLM. With `MOCK_LLM=1` the app runs end-to-end using deterministic
-template explanations.
+Log in with **demo / cashbridge-demo**. The demo clock is pinned to 2026-11-06
+(`CASHBRIDGE_AS_OF`), so the three stories are reproducible on any day:
 
-## Demo businesses
-
-| Business | Sector | Role in demo |
+| Business | p(breach 14d) | Decision |
 |---|---|---|
-| Warung Sembako Bu Sari | retail | Healthy control — no gap detected |
-| Dapur Nusantara Catering | catering | Gap detected, **loan rejected** (repayment capacity insufficient) |
-| Kirana Online Store | ecommerce | Gap detected, **loan approved** (moving-money happy path) |
+| Warung Sembako Bu Sari | 0% | No loan needed |
+| Dapur Nusantara Catering | 95% | Loan blocked (repayment capacity); chasing invoices cuts risk to ~46% |
+| Kirana Online Store | 72% | Loan available: IDR 4.5M, 18.9–19.9% a year all-in, repaid on time in 100% of simulations; chasing invoices alone cuts risk to ~1% |
 
-## Repo layout
+With `MOCK_LLM=1` (default) answers come from the deterministic template engine. To use
+a real model, set `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `MOCK_LLM=0`, and turn on
+"Send pseudonymised figures to an external AI provider" for the business.
 
+## Verify
+
+```bash
+python -m pytest -q                    # 100 tests
+python scripts/run_redteam.py          # 30 attacks -> reports/redteam_report.md
+python scripts/evaluate_forecast.py    # A/B/C evaluation -> reports/eval_report.md
+python scripts/demo_run.py             # end-to-end sandbox run -> evidence/
 ```
-cashbridge/    deterministic core: db, seed, ingest, forecast, gap, sizing, products, recommend, weekly
-app/           FastAPI web app + sandbox bank API: orchestrator (LLM tool calling), policy engine,
-               audit hash-chain, guardrails, service layer, tools, Jinja2 templates
-scripts/       CLI helpers (seed data, ask the copilot, run the web app)
-tests/         pytest suite (analytics, policy, security, web, end-to-end)
-docs/          evaluation notes and demo video script
+
+## Deploy
+
+```bash
+export CASHBRIDGE_SECRET=$(python -c "import secrets;print(secrets.token_urlsafe(48))")
+export DEMO_PASSWORD='choose-a-long-password'
+docker compose up --build              # non-root, APP_ENV=production, SQLite on a volume
 ```
 
-## Status (roadmap)
+Serve behind HTTPS. Production refuses to start without the two secrets, disables
+`/api/docs`, and sends HSTS. CI: `.github/workflows/ci.yml`.
 
-- [x] **Week 1** — repo skeleton, SQLite schema, synthetic data generator, CSV ingest, forecast (3 scenarios), gap detection, loan sizing, alternatives-first recommendations, evaluation helpers
-- [x] **Week 2** — policy engine (T0–T3 + amount caps + idempotency + approval gates), tamper-evident audit hash-chain, guardrails (numeric consistency + prompt-injection wrapping), service layer (consent → draft → approve → sandbox disburse → repayments), LLM orchestrator with OpenAI-compatible tool calling (`OPENROUTER_BASE_URL` + `OPENROUTER_API_KEY` from env), `MOCK_LLM` template engine, `scripts/ask.py` CLI
-- [x] **Week 3** — FastAPI web app (Jinja2 + Chart.js): first-run onboarding with CSV upload (<3 min to the "when will money run short" answer), dashboard with scenarios chart, alternatives-first options, draft → approve → disburse flow, what-if simulations, weekly delta, bill reminders, re-upload with dedup, onboarding consent + revocable, audit page; sandbox bank API (`/api/bank/...`, idempotent disburse, 409s for replay/no-approval)
-- [ ] **Week 4** — evaluation metrics, security tests, demo video
+## Submission checklist
 
-### Verified demo scenarios (seed 42)
-
-| Business | Balance today | 14-day forecast | Decision |
-|---|---|---|---|
-| Warung Sembako Bu Sari | IDR 48.5M | min low 34.4M — no gap | No loan needed |
-| Dapur Nusantara Catering | IDR 12.5M | gap expected, depth 38.6M | **Loan blocked** (capacity −0.18x; collection acceleration clears it) |
-| Kirana Online Store | IDR 15.6M | gap risk, depth 12.4M | **Receivable Bridge IDR 13.6M** (coverage 1.37x) |
-
-Forecast band coverage vs. hidden ground truth: 100% / 86% / 93% of the 14
-projected days. 65 tests passing.
-
-## Web app
-
-`python scripts/run_web.py` → http://127.0.0.1:8000
-
-The UI follows `design.md` (dark-mode-first, data-dense cockpit): elevation-based
-charcoal surfaces, lightened semantic colors (#8AB4F8 / #81C995 / #F28B82),
-tabular numerals always at full primary contrast, no shadows on resting cards,
-outlined icons, skeletal shimmer loading, and a persistent ask bar.
-Fonts: Google Sans (display + body, weights 400–700 + italic) loads from the
-Google Fonts CDN with `display=swap`; Roboto, Roboto Mono, and Plus Jakarta Sans
-are bundled locally in `app/static/fonts/` as the automatic offline fallback,
-so the UI stays intact without internet.
-
-| Page | What it shows |
+| Item | Where |
 |---|---|
-| `/` | watchlist: every business with balance, 7-day delta chip, outlook, consent |
-| `/business/{id}` | 14-day chart (low/expected/high + safety line), non-loan options first, draft → approve → disburse, repayments, this-week delta, bill reminders, CSV re-upload, recent audit — plus the bottom **ask bar** with slide-up grounded answers and what-if simulations in the rail |
-| `/onboard` | first run: create a business + upload transactions, answer in under three minutes |
-| `/bank` | sandbox lender view: products, loans, ledger, API docs |
-| `/audit` | tamper-evident hash-chain trail with integrity check |
-| `/api/docs` | interactive OpenAPI docs (includes the `/api/bank/...` sandbox endpoints) |
+| Technical documentation (architecture, algorithms, security design) | `docs/TECHNICAL_DOCUMENTATION.md` |
+| Security self-assessment (tiers, known risks) | `docs/SECURITY_SELF_ASSESSMENT.md`, `reports/redteam_report.md` |
+| Regulatory mapping (China, Indonesia) | `docs/COMPLIANCE.md` |
+| Source code, README, deployment, tests | this repo, `Dockerfile`, `docker-compose.yml`, `tests/` |
+| Execution evidence (sandbox logs) | `evidence/` (operation log, audit chain + verification, ledger) |
+| Evaluation | `reports/eval_report.md`, `reports/eval_results.json` |
 
-A **ticker strip** (business, balance, Δ 7 days) sits under the top nav on every page.
+## Repository layout
 
-> Note: every forecast is an estimate, not financial advice. All disbursements
-> and repayments are sandbox simulations. This is not a licensed financial
-> advisor.
+```
+app/          FastAPI app: guard/auth, pages, API, agent orchestrator, tools, policy,
+              approval tokens, audit chain, templates, static (vendored Chart.js, fonts)
+cashbridge/   engine (no LLM): forecast, gap, recommend, sizing, products, reconcile,
+              ingest, seed, config
+scripts/      seed_data, run_web, ask, evaluate_forecast, run_redteam, demo_run,
+              fetch_datasets
+tests/        100 tests
+data/external Online Retail II daily aggregate (CC BY 4.0) for evaluation
+docs/ reports/ evidence/
+```
+
+## Licences and data
+
+Online Retail II (Chen 2012, UCI, CC BY 4.0, doi:10.24432/C5CG6D) — derived daily
+aggregate only. Chart.js 4.4.1 (MIT), Roboto / Roboto Mono (Apache-2.0), Plus Jakarta
+Sans (OFL-1.1); licence files are next to the assets. Demo businesses are synthetic.
+
+> Forecasts are estimates, not financial advice. Every disbursement and repayment here
+> is a sandbox simulation; no real money moves.
