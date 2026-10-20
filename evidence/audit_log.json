@@ -1,0 +1,156 @@
+[
+  {
+    "id": 1,
+    "ts": "2026-10-20T07:12:54Z",
+    "actor": "demo",
+    "action": "consent_granted",
+    "entity_type": "business",
+    "entity_id": "1",
+    "payload": "{\"scope\":\"cashflow_analysis,financing\"}",
+    "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "hash": "1ddc53c49bbd555f57b7021fb8648578daed96ca26dc9eecc307b84966ccc31e"
+  },
+  {
+    "id": 2,
+    "ts": "2026-10-20T07:12:54Z",
+    "actor": "demo",
+    "action": "consent_granted",
+    "entity_type": "business",
+    "entity_id": "2",
+    "payload": "{\"scope\":\"cashflow_analysis,financing\"}",
+    "prev_hash": "1ddc53c49bbd555f57b7021fb8648578daed96ca26dc9eecc307b84966ccc31e",
+    "hash": "6caccbe38b3b223f1e0f277278756cb05840927bc97a32ba9d06b8832e577d2f"
+  },
+  {
+    "id": 3,
+    "ts": "2026-10-20T07:12:54Z",
+    "actor": "demo",
+    "action": "consent_granted",
+    "entity_type": "business",
+    "entity_id": "3",
+    "payload": "{\"scope\":\"cashflow_analysis,financing\"}",
+    "prev_hash": "6caccbe38b3b223f1e0f277278756cb05840927bc97a32ba9d06b8832e577d2f",
+    "hash": "a4b68930ef89469aebb85972a522884737527394a7d836f78543e9a175769a0c"
+  },
+  {
+    "id": 4,
+    "ts": "2026-10-20T07:12:54Z",
+    "actor": "demo",
+    "action": "login",
+    "entity_type": "owner",
+    "entity_id": "demo",
+    "payload": "{}",
+    "prev_hash": "a4b68930ef89469aebb85972a522884737527394a7d836f78543e9a175769a0c",
+    "hash": "acac0d48d32ed1e222464404fc74ea10b8adbaf084e858b7a7a46f67ddf5695c"
+  },
+  {
+    "id": 5,
+    "ts": "2026-10-20T07:12:55Z",
+    "actor": "agent",
+    "action": "advice_generated",
+    "entity_type": "business",
+    "entity_id": "2",
+    "payload": "{\"engine\":\"mock\",\"question\":\"Can I get a loan?\",\"tools\":[\"get_cash_overview\",\"get_recommendations\"],\"validation_ok\":true}",
+    "prev_hash": "acac0d48d32ed1e222464404fc74ea10b8adbaf084e858b7a7a46f67ddf5695c",
+    "hash": "44379d0fc0aea9a64bf462417b4d05f3c324ed9dde3b2f42b0e117d7417b9a80"
+  },
+  {
+    "id": 6,
+    "ts": "2026-10-20T07:12:56Z",
+    "actor": "bank_sandbox",
+    "action": "offer_draft_blocked",
+    "entity_type": "business",
+    "entity_id": "2",
+    "payload": "{\"product_id\":\"receivable_bridge\",\"reason\":\"Repayment capacity too thin: projected net cash over 45 days covers only -0.25x of the installment total (needs 1.2x).\"}",
+    "prev_hash": "44379d0fc0aea9a64bf462417b4d05f3c324ed9dde3b2f42b0e117d7417b9a80",
+    "hash": "66e85d53cde750ee54067bf54a8705eed949eddec2ebf6ba1c3eff79459e33a3"
+  },
+  {
+    "id": 7,
+    "ts": "2026-10-20T07:12:57Z",
+    "actor": "bank_sandbox",
+    "action": "offer_drafted",
+    "entity_type": "offer",
+    "entity_id": "1",
+    "payload": "{\"business_id\":3,\"coverage_ratio\":2.1,\"principal\":4500000.0,\"product_id\":\"quick_stock_advance\"}",
+    "prev_hash": "66e85d53cde750ee54067bf54a8705eed949eddec2ebf6ba1c3eff79459e33a3",
+    "hash": "88de2895555f0f0c9db95d70da3cb2a7895db561cbfee913970b39c6c5baee90"
+  },
+  {
+    "id": 8,
+    "ts": "2026-10-20T07:12:57Z",
+    "actor": "bank_sandbox",
+    "action": "disbursement_denied",
+    "entity_type": "offer",
+    "entity_id": "1",
+    "payload": "{\"code\":\"approval_missing\",\"reason\":\"An owner approval token is required to move money.\"}",
+    "prev_hash": "88de2895555f0f0c9db95d70da3cb2a7895db561cbfee913970b39c6c5baee90",
+    "hash": "2f05f6d7eb001ecbf4d67a6e9a672469502026d7213bc77eabf00af638a5932b"
+  },
+  {
+    "id": 9,
+    "ts": "2026-10-20T07:12:57Z",
+    "actor": "demo",
+    "action": "offer_approved",
+    "entity_type": "offer",
+    "entity_id": "1",
+    "payload": "{\"note\":null,\"principal\":4500000.0,\"product_id\":\"quick_stock_advance\",\"terms_hash\":\"0ef0599dd1dbef1f120804c84143203f240558ac90c6eea04265b95f5f29e17f\"}",
+    "prev_hash": "2f05f6d7eb001ecbf4d67a6e9a672469502026d7213bc77eabf00af638a5932b",
+    "hash": "dea896b21436a528eb9881ab1383d1dcd9476ab8abf32eeca3389ba33448dccf"
+  },
+  {
+    "id": 10,
+    "ts": "2026-10-20T07:12:58Z",
+    "actor": "bank_sandbox",
+    "action": "loan_disbursed_sandbox",
+    "entity_type": "loan",
+    "entity_id": "1",
+    "payload": "{\"approval_nonce\":\"4a0b41ff86d633d53fff89e834579e7d\",\"approved_by\":\"demo\",\"idempotency_key\":\"evidence-disburse-1\",\"installments\":5,\"offer_id\":1,\"principal\":4500000.0}",
+    "prev_hash": "dea896b21436a528eb9881ab1383d1dcd9476ab8abf32eeca3389ba33448dccf",
+    "hash": "bb70a930463d3c1836895e839ba59972870dda5be6a6e3f45ba071cd492187ce"
+  },
+  {
+    "id": 11,
+    "ts": "2026-10-20T07:12:58Z",
+    "actor": "bank_sandbox",
+    "action": "disbursement_denied",
+    "entity_type": "offer",
+    "entity_id": "1",
+    "payload": "{\"code\":\"duplicate_action\",\"reason\":\"This approval was already used.\"}",
+    "prev_hash": "bb70a930463d3c1836895e839ba59972870dda5be6a6e3f45ba071cd492187ce",
+    "hash": "9cc9c036822f1a603ea91db93231ee429cfa3dbe8afad5a99f3fe614e07cace7"
+  },
+  {
+    "id": 12,
+    "ts": "2026-10-20T07:12:58Z",
+    "actor": "bank_sandbox",
+    "action": "repayment_paid_sandbox",
+    "entity_type": "repayment",
+    "entity_id": "1",
+    "payload": "{\"amount\":909000.0,\"loan_id\":1,\"remaining\":4}",
+    "prev_hash": "9cc9c036822f1a603ea91db93231ee429cfa3dbe8afad5a99f3fe614e07cace7",
+    "hash": "a6aa171159ce8f76b42a59f3aa5e018f17e9860e6f9ea164d0f94191aa172079"
+  },
+  {
+    "id": 13,
+    "ts": "2026-10-20T07:12:58Z",
+    "actor": "demo",
+    "action": "receivable_reconciled",
+    "entity_type": "receivable",
+    "entity_id": "51",
+    "payload": "{\"amount\":12343000.0,\"transaction_id\":512}",
+    "prev_hash": "a6aa171159ce8f76b42a59f3aa5e018f17e9860e6f9ea164d0f94191aa172079",
+    "hash": "c252077e0559745f69f7c847b90ec62d50be2c3fb0caf1e64d644c51ddbf1317"
+  },
+  {
+    "id": 14,
+    "ts": "2026-10-20T07:12:58Z",
+    "actor": "demo",
+    "action": "human_review_requested",
+    "entity_type": "business",
+    "entity_id": "2",
+    "payload": "{\"review_id\":1,\"subject\":\"loan_decision\"}",
+    "prev_hash": "c252077e0559745f69f7c847b90ec62d50be2c3fb0caf1e64d644c51ddbf1317",
+    "hash": "7076f69d05c5306165e96afad2cbec2d62fff84283080c0e7d59b2e337c178a9"
+  }
+]
