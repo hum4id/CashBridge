@@ -16,20 +16,25 @@
     </div>
     <div class="row">
       {% if consent_active %}
-      <form method="post" action="/business/{{ business.id }}/consent/revoke">
+      <form method="post" action="/business/{{ business.id }}/consent/revoke"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <button class="text small">Revoke data consent</button>
       </form>
       {% else %}
-      <form method="post" action="/business/{{ business.id }}/consent/grant">
+      <form method="post" action="/business/{{ business.id }}/consent/grant"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <button class="primary small">Grant data consent</button>
       </form>
       {% endif %}
     </div>
   </div>
+  <div class="status status-{{ status }}" role="status">
+    <strong>{% if status == 'act' %}Act now{% elif status == 'watch' %}Watch closely{% else %}You look safe{% endif %}</strong>
+    <span>Chance your balance drops below your safety level in the next {{ rec.forecast.horizon_days }} days:
+      <b>{{ '%.0f'|format(p_breach * 100) }}%</b></span>
+  </div>
   <dl class="facts">
     <div><dt>Balance today</dt><dd>{{ balance|idr }}</dd></div>
     <div><dt>Safety threshold</dt><dd>{{ business.safety_balance|idr }}</dd></div>
-    <div><dt>Lowest projected (low, {{ rec.forecast.horizon_days }}d)</dt>
+    <div><dt>Lowest likely balance (P10, {{ rec.forecast.horizon_days }}d)</dt>
       <dd>{{ min_low|idr }}
         <span class="chip {{ 'gain' if headroom >= 0 else 'loss' }}">
           <svg class="icon tiny"><use href="#i-{{ 'up' if headroom >= 0 else 'down' }}"/></svg>{{ headroom|signed_short }} vs safety
@@ -57,8 +62,10 @@
     <div class="card">
       <h2>14-day cash outlook</h2>
       <div class="chartbox"><canvas id="forecastChart"></canvas></div>
-      <p class="muted small">Three transparent scenarios from your own history and open receivables.
-        The dashed line is your safety threshold ({{ business.safety_balance|idr }}).</p>
+      <p class="muted small">Band = 80% of {{ 2000 }} simulated futures (P10 to P90) built from your own history
+        and each customer's payment delays; middle line = most likely. The dashed line is your safety threshold
+        ({{ business.safety_balance|idr }}).{% if not rec.forecast.data_sufficient %}
+        <strong>Low confidence: only {{ rec.forecast.history_days }} days of history (8 weeks needed).</strong>{% endif %}</p>
     </div>
 
     {% if gap %}
@@ -74,6 +81,7 @@
           </div>
           <div class="sub">{{ o.detail }}</div>
           <div class="row small">
+            <span class="chip">risk {{ '%.0f'|format(rec.gap.p_breach * 100) }}% &rarr; {{ '%.0f'|format(o.impact.p_breach_after * 100) }}%</span>
             {% if o.impact.clears_gap %}<span class="chip gain">clears the gap</span>
             {% elif o.impact.improvement > 0 %}<span class="chip loss-soft">reduces the gap</span>
             {% else %}<span class="chip">no effect here</span>{% endif %}
@@ -88,16 +96,22 @@
 
     <div class="card">
       <h2>If borrowing is still needed</h2>
-      {% if not rec.loan %}
+      {% if rec.decision == 'insufficient_data' %}
+      <p class="muted">{{ rec.message }}</p>
+      {% elif 'financing' not in active_scopes %}
+      <p class="muted">Financing is off: you have not given consent to assess financing. Turn it on under
+        <em>Your data &amp; consent</em> if you want loan options.</p>
+      {% elif not rec.loan %}
       <p class="muted">No financing needed — there is no gap to cover.</p>
       {% elif rec.loan.blocked %}
       <p class="danger-text"><strong>Financing not recommended:</strong> {{ rec.loan.block_reason }}.</p>
       <table class="table small">
-        <thead><tr><th>Product</th><th>Tenor</th><th class="right">Coverage</th><th class="right">Required</th><th>Why not</th></tr></thead>
+        <thead><tr><th>Product</th><th>Tenor</th><th class="right">Annual cost</th><th class="right">Coverage</th><th class="right">Required</th><th>Why not</th></tr></thead>
         <tbody>
         {% for p in rec.loan.products %}
         <tr>
           <td>{{ p.name }}</td><td>{{ p.tenor_days }}d</td>
+          <td class="right">{{ '%.1f'|format(p.cost_disclosure.apr_effective * 100) }}%</td>
           <td class="right">{{ '%.2f'|format(p.coverage_ratio) }}x</td>
           <td class="right">{{ '%.2f'|format(p.min_coverage_ratio) }}x</td>
           <td class="muted">{{ p.reason or 'sized and affordable' }}</td>
@@ -106,11 +120,12 @@
         </tbody>
       </table>
       {% else %}
-      <form class="row" method="post" action="/business/{{ business.id }}/offers">
+      <form class="row" method="post" action="/business/{{ business.id }}/offers"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <select name="product_id">
           {% for p in rec.loan.eligible %}
           <option value="{{ p.product_id }}">
-            {{ p.name }} — {{ p.principal|idr }}, {{ p.tenor_days }}d, coverage {{ '%.2f'|format(p.coverage_ratio) }}x
+            {{ p.name }} — {{ p.principal|idr }}, {{ p.tenor_days }}d, total cost {{ (p.total_repayment - p.principal)|idr }}
+            ({{ '%.1f'|format(p.cost_disclosure.apr_effective * 100) }}% a year), repaid on time in {{ '%.0f'|format(p.repay_prob * 100) }}% of simulations
           </option>
           {% endfor %}
         </select>
@@ -136,20 +151,72 @@
             {% if o.last_approval %}<div class="sub">by {{ o.last_approval.actor }} ({{ o.last_approval.decision }})</div>{% endif %}
           </td>
           <td class="actions">
-            {% if o.status == 'draft' %}
-            <form method="post" action="/offers/{{ o.id }}/approve"><button class="primary small">Approve</button></form>
-            <form method="post" action="/offers/{{ o.id }}/reject"><button class="small">Reject</button></form>
-            {% elif o.status == 'approved' %}
-            <form method="post" action="/offers/{{ o.id }}/disburse"><button class="primary small">Disburse (sandbox)</button></form>
+            {% if o.status == 'draft' %}<span class="muted small">review below</span>
             {% else %}<span class="muted small">{{ o.status }}</span>{% endif %}
           </td>
         </tr>
+        {% if o.status == 'draft' %}
+        <tr class="offer-review"><td colspan="7">
+          <div class="offer-review-inner">
+            {% if o.disclosure_obj %}{% set d = o.disclosure_obj %}
+            <dl class="disclosure small">
+              <div><dt>You receive</dt><dd>{{ d.principal|idr }}</dd></div>
+              <div><dt>You repay in total</dt><dd>{{ d.total_repayment|idr }}</dd></div>
+              <div><dt>Total cost (fees)</dt><dd>{{ d.total_cost|idr }}</dd></div>
+              <div><dt>Annualised cost</dt><dd>{{ '%.1f'|format(d.apr_effective * 100) }}% (legal cap {{ '%.0f'|format(d.rate_cap * 100) }}%, {{ d.rate_cap_jurisdiction }})</dd></div>
+              <div><dt>Other charges</dt><dd>{{ d.contingent_costs }}</dd></div>
+            </dl>
+            {% endif %}
+            <div class="stack">
+              <form method="post" action="/offers/{{ o.id }}/approve" class="approve-form"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+                <label class="small"><input type="checkbox" name="confirm" value="yes" required>
+                  I read the amount, fee and repayment dates</label>
+                <button class="primary small">Approve &amp; disburse (sandbox)</button></form>
+              <form method="post" action="/offers/{{ o.id }}/reject"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><button class="small">Reject</button></form>
+            </div>
+          </div>
+        </td></tr>
+        {% endif %}
         {% endfor %}
         </tbody>
       </table>
       {% endif %}
+      {% if rec.loan %}
+      <form method="post" action="/business/{{ business.id }}/review" class="row"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <button class="text small">Ask a person to review this decision</button>
+        <span class="muted small">The result above is automated. You can contest it and get a human re-check.</span>
+      </form>
+      {% for rv in reviews %}<div class="sub small">Review #{{ rv.id }}: {{ rv.status }}</div>{% endfor %}
+      {% endif %}
     </div>
     {% endif %}
+
+    <div class="card">
+      <h2>Match payments to invoices</h2>
+      {% if recon.matches %}
+      <p class="muted small">These bank credits look like payments for open invoices. Confirm to mark them paid —
+        until then the forecast still waits for that money.</p>
+      <table class="table small">
+        <thead><tr><th>Customer</th><th class="right">Amount</th><th>Paid on</th><th>Match</th><th></th></tr></thead>
+        <tbody>
+        {% for m in recon.matches %}
+        <tr><td>{{ m.debtor }}</td><td class="right">{{ m.amount|idr }}</td><td>{{ m.paid_on }}</td>
+          <td><span class="chip {{ 'gain' if m.confidence == 'high' }}">{{ m.confidence }}</span></td>
+          <td><form method="post" action="/business/{{ business.id }}/reconcile"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <input type="hidden" name="receivable_id" value="{{ m.receivable_id }}">
+            <input type="hidden" name="transaction_id" value="{{ m.transaction_id }}">
+            <button class="small primary">Confirm</button></form></td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="muted small">All recent payments are matched to invoices.</p>
+      {% endif %}
+      {% if recon.overdue_unmatched %}
+      <p class="small"><strong>{{ recon.overdue_unmatched|length }} invoices are overdue</strong>
+        ({{ recon.overdue_total|idr }}), oldest {{ recon.overdue_unmatched[0].days_overdue }} days.</p>
+      {% endif %}
+    </div>
 
     {% if sandbox.repayments %}
     <div class="card">
@@ -164,7 +231,7 @@
           <td><span class="chip {{ 'gain' if r.status == 'paid' }}">{{ r.status }}</span></td>
           <td class="actions">
             {% if r.status == 'scheduled' %}
-            <form method="post" action="/repayments/{{ r.id }}/pay"><button class="small">Mark paid (simulate payout)</button></form>
+            <form method="post" action="/repayments/{{ r.id }}/pay"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}"><button class="small">Mark paid (simulate payout)</button></form>
             {% endif %}
           </td>
         </tr>
@@ -174,8 +241,26 @@
     </div>
     {% endif %}
 
+    <div class="card" id="data-rights">
+      <h2>Your data &amp; consent</h2>
+      <ul class="optionlist">
+        {% for key, label in scopes.items() %}
+        <li class="spread">
+          <span>{{ label }}</span>
+          <form method="post" action="/business/{{ business.id }}/consent/{{ key }}/{{ 'revoke' if key in active_scopes else 'grant' }}"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+            <span class="chip {{ 'gain' if key in active_scopes }}">{{ 'on' if key in active_scopes else 'off' }}</span>
+            <button class="text small">{{ 'Turn off' if key in active_scopes else 'Turn on' }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      <form method="post" action="/business/{{ business.id }}/delete-data" class="row small"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+        <label>Erase my transactions, invoices and forecasts — type DELETE
+          <input type="text" name="confirm" autocomplete="off" size="8"></label>
+        <button class="small">Erase</button>
+      </form>
+    </div>
   </div>
-
   <div class="col side">
 
     <div class="card">
@@ -237,7 +322,7 @@
 
     <div class="card">
       <h2>Add this week's transactions</h2>
-      <form class="row" method="post" action="/business/{{ business.id }}/upload" enctype="multipart/form-data">
+      <form class="row" method="post" action="/business/{{ business.id }}/upload" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <input type="file" name="file" accept=".csv" required>
         <button><svg class="icon"><use href="#i-upload"/></svg>Upload CSV</button>
       </form>
@@ -279,11 +364,6 @@
     <svg class="icon lead"><use href="#i-sparkle"/></svg>
     <input class="text" type="text" name="question" placeholder="Ask anything about this business"
            autocomplete="off" aria-label="Ask anything about this business">
-    <select name="tier" title="Permission tier for this answer">
-      <option value="T2" selected>T2</option>
-      <option value="T1">T1</option>
-      <option value="T0">T0</option>
-    </select>
     <button class="send" type="submit" id="ask-send" disabled aria-label="Send question">
       <svg class="icon"><use href="#i-send"/></svg>
     </button>
@@ -292,6 +372,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script>window.CASHBRIDGE_CHART = {{ chart|tojson }};</script>
+<script src="/static/vendor/chart-4.4.1.umd.min.js"></script>
+<script type="application/json" id="chart-data">{{ chart|tojson }}</script>
 {% endblock %}

@@ -5,9 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#0E0F11">
 <title>{% block title %}CashBridge{% endblock %}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&display=swap">
+{% if request.state.csrf is defined %}<meta name="csrf-token" content="{{ request.state.csrf }}">{% endif %}
 <link rel="stylesheet" href="/static/style.css">
 {% block head %}{% endblock %}
 </head>
@@ -34,6 +32,10 @@
       <a href="/onboard" class="{{ 'active' if nav_active == 'onboard' }}">+ New business</a>
     </nav>
     <div class="engine" title="Explanation engine">{{ engine_label }}</div>
+    {% if request.state.owner is defined %}
+    <form method="post" action="/logout" class="logout"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
+      <button class="small" title="Signed in as {{ request.state.owner }}">Log out</button></form>
+    {% endif %}
   </div>
 </header>
 

@@ -67,7 +67,8 @@
         <tr><td>GET</td><td><code>/api/bank/loans?business_id=</code></td></tr>
       </table>
       <p class="muted small">Duplicate disburse attempts return <code>409 duplicate_action</code>.
-        Execution without approval returns <code>409 approval_missing</code>.
+        Execution without the owner's single-use approval token returns <code>409 approval_missing</code>;
+        a token for different terms returns <code>409 approval_terms_changed</code>.
         Open API docs: <a href="/api/docs">/api/docs</a></p>
     </div>
 
@@ -77,11 +78,13 @@
   -H "Content-Type: application/json" \
   -d '{"business_id": 3, "product_id": "receivable_bridge"}'
 
+# every call needs the owner's session cookie (cb_session) and X-CSRF-Token
 curl -X POST localhost:8000/api/bank/offers/1/approve \
-  -H "Content-Type: application/json" -d '{"actor": "owner"}'
+  -H "Content-Type: application/json" -d '{}'
+# -> {"approval_token": "...", "expires_in_seconds": 300}
 
 curl -X POST localhost:8000/api/bank/offers/1/disburse \
-  -H "Idempotency-Key: demo-disburse-1"</pre>
+  -H "Idempotency-Key: demo-disburse-1" -H "X-Approval-Token: <token>"</pre>
     </div>
   </div>
 </div>

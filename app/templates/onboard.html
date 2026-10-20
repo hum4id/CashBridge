@@ -10,7 +10,7 @@
 <div class="grid">
   <div class="col main">
     <div class="card">
-      <form method="post" action="/onboard" enctype="multipart/form-data" class="stack">
+      <form method="post" action="/onboard" enctype="multipart/form-data" class="stack"><input type="hidden" name="csrf_token" value="{{ request.state.csrf }}">
         <label>Business name
           <input type="text" name="name" required placeholder="Warung Bu Sari">
         </label>
