@@ -48,7 +48,7 @@ class Seeder:
     def __init__(self, conn, as_of: Optional[date] = None, seed: int = 42,
                  history_days: int = 84, future_days: int = 30):
         self.conn = conn
-        self.as_of = util.parse_date(as_of) if as_of else date.today()
+        self.as_of = util.parse_date(as_of) if as_of else util.today()
         self.seed = seed
         self.history_days = history_days
         self.future_days = future_days
