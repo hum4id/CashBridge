@@ -1,0 +1,152 @@
+{
+  "A_in_distribution": {
+    "n": 96,
+    "p10_cov": 0.87,
+    "p90_cov": 0.974,
+    "band_cov": 0.844,
+    "pinball_model": 1871403,
+    "pinball_naive": 7404694,
+    "precision_act": [
+      0.711,
+      [
+        0.566,
+        0.823
+      ]
+    ],
+    "recall_act": [
+      0.97,
+      [
+        0.847,
+        0.995
+      ]
+    ],
+    "precision_any": [
+      0.615,
+      [
+        0.48,
+        0.735
+      ]
+    ],
+    "recall_any": [
+      0.97,
+      [
+        0.847,
+        0.995
+      ]
+    ],
+    "brier_model": 0.106,
+    "brier_base_rate": 0.226,
+    "breach_rate": 0.344,
+    "loan_cover_ratio_median": 3.32,
+    "loan_sufficient_share": 0.842,
+    "loan_offers_without_actual_breach": 9,
+    "story_hit": 0.802,
+    "by_business": {
+      "katering": {
+        "band_cov": 0.946,
+        "p10_cov": 0.982,
+        "p90_cov": 0.964
+      },
+      "online": {
+        "band_cov": 0.752,
+        "p10_cov": 0.788,
+        "p90_cov": 0.964
+      },
+      "sembako": {
+        "band_cov": 0.833,
+        "p10_cov": 0.839,
+        "p90_cov": 0.993
+      }
+    }
+  },
+  "B_adversarial": {
+    "n": 96,
+    "p10_cov": 0.452,
+    "p90_cov": 0.984,
+    "band_cov": 0.436,
+    "pinball_model": 4667005,
+    "pinball_naive": 6185148,
+    "precision_act": [
+      1.0,
+      [
+        0.921,
+        1.0
+      ]
+    ],
+    "recall_act": [
+      0.763,
+      [
+        0.64,
+        0.853
+      ]
+    ],
+    "precision_any": [
+      1.0,
+      [
+        0.931,
+        1.0
+      ]
+    ],
+    "recall_any": [
+      0.881,
+      [
+        0.775,
+        0.941
+      ]
+    ],
+    "brier_model": 0.188,
+    "brier_base_rate": 0.237,
+    "breach_rate": 0.615,
+    "loan_cover_ratio_median": 0.45,
+    "loan_sufficient_share": 0.214,
+    "loan_offers_without_actual_breach": 0,
+    "story_hit": 0.802,
+    "by_business": {
+      "katering": {
+        "band_cov": 0.806,
+        "p10_cov": 0.83,
+        "p90_cov": 0.975
+      },
+      "online": {
+        "band_cov": 0.23,
+        "p10_cov": 0.246,
+        "p90_cov": 0.984
+      },
+      "sembako": {
+        "band_cov": 0.272,
+        "p10_cov": 0.281,
+        "p90_cov": 0.991
+      }
+    }
+  },
+  "C_real_online_retail_ii": {
+    "n": 42,
+    "p10_cov": 0.952,
+    "p90_cov": 0.842,
+    "band_cov": 0.794,
+    "pinball_model": 516893936,
+    "pinball_naive": 517056619,
+    "origins": 42,
+    "worst_band_cov": 0.143
+  },
+  "config": {
+    "dates": [
+      "2026-10-02",
+      "2026-10-09",
+      "2026-10-16",
+      "2026-10-23",
+      "2026-10-30",
+      "2026-11-06",
+      "2026-11-13",
+      "2026-11-20"
+    ],
+    "seeds": [
+      42,
+      7,
+      11,
+      23
+    ],
+    "horizon": 14,
+    "P_ACT": 0.3
+  }
+}
