@@ -203,7 +203,7 @@ def ingest_rows(conn: sqlite3.Connection, business_id: int, rows: pd.DataFrame,
 def export_sample_csv(conn: sqlite3.Connection, business_id: int, path,
                       days: int = 30, as_of=None) -> None:
     """Export the last N days of transactions as an upload-ready CSV."""
-    end = util.format_date(as_of) if as_of else date.today().isoformat()
+    end = util.format_date(as_of) if as_of else util.today().isoformat()
     start = util.format_date(util.add_days(end, -int(days)))
     rows = conn.execute(
         """SELECT date, description, counterparty, amount, direction
